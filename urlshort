@@ -1,0 +1,190 @@
+lua_package_path '/usr/local/share/lua/5.1/json/?.lua;;';
+# psql db
+upstream pgdb {
+    postgres_server 127.0.0.1 dbname=pgsql user=pgsql;
+}
+
+# archive.org for snapshots
+upstream archiveorg {
+    server web.archive.org;
+}
+
+server {
+    listen 80;
+    server_name mtb.wtf;
+    root /var/www/urls;
+    index index.html;
+    
+    # Matches 5 hex chars
+    location ~ "^/([0-9a-zA-Z]{5})$" {
+        # grab from db, redirect found url. If not found, redirect to mtb.wtf
+        content_by_lua '
+            local res = ngx.location.capture("/lookup",
+              { args = { query = string.sub(ngx.var.request_uri, 2) } }
+            );
+            if res.body == "" then
+              ngx.redirect("http://mtb.wtf/")
+            end
+
+            if string.sub(res.body,1,string.len("http://"))=="http://" then
+              ngx.redirect(res.body)
+            elseif string.sub(res.body,1,string.len("https://"))=="https://" then
+              ngx.redirect(res.body)
+            else
+              ngx.redirect("http://"..res.body)
+            end
+        ';
+    }
+
+    # "all" information on the url
+    location ~ "^/a/([0-9a-zA-Z]{5})$" {
+        rds_json on;
+
+        postgres_pass pgdb;
+
+        postgres_escape $uid $1;
+        postgres_query GET "SELECT uid,url,saved_at FROM (SELECT *, row_number() over (partition by url order by saved_at) as row_number FROM archives) as rows WHERE row_number = 1 and uid = $uid;";
+
+        # Return 204 no content if that url is not in the db
+        postgres_rewrite GET no_rows 204;
+
+        postgres_output rds;
+    }
+
+    # "short" information on the url
+    location ~ "^/s/([0-9a-zA-Z]{5})$" {
+        rds_json on;
+        postgres_pass pgdb;
+
+        postgres_escape $uid $1;
+        postgres_query GET "SELECT uid,url,created_at,archive FROM links WHERE uid = $uid;";
+
+        postgres_rewrite GET no_rows 204;
+        postgres_output rds;
+    }
+
+    # html formatted info from "/s/....."
+    location ~ "^/i/([0-9a-zA-Z]{5})$" {
+        try_files $uri /i.html;
+    }
+
+    # Looks up a url from a uid
+    location /lookup {
+        internal;
+
+        postgres_pass pgdb;
+
+        postgres_escape $esc_uid $arg_query;
+        postgres_query GET "SELECT url FROM links WHERE uid = $esc_uid";
+
+        postgres_rewrite GET no_rows 204;
+
+        postgres_output text;
+    }
+
+    # Does a reverse lookup: find a uid by a url
+    location /lookupbyurl {
+        internal;
+        rds_json on;
+
+        postgres_pass pgdb;
+
+        postgres_escape $esc_url $arg_query;
+        postgres_query GET "SELECT uid FROM links WHERE url = $esc_url LIMIT 1;";
+
+        postgres_rewrite GET no_rows 204;
+
+        postgres_output rds;
+    }
+
+    # Actually does the archive.org lookup
+    location ~ /archive/(.*)$ {
+        internal;
+
+        proxy_set_header Host web.archive.org;
+        proxy_pass http://archiveorg/save/$1;
+        
+    }
+
+    # Archives an archive.org url to the database
+    location /archiveintodb {
+        internal;
+
+        postgres_pass pgdb;
+        postgres_escape $archiveurl $arg_archiveurl;
+        postgres_escape $uid $arg_uid;
+        
+        postgres_query GET "INSERT INTO archives (uid, url) VALUES($uid, $archiveurl);";
+    }
+
+    # 1st step of archiving a url. Looks up the archive.org link
+    location /archiveurl {
+        internal;
+        set $archive '';
+
+        content_by_lua '
+            local res = ngx.location.capture("/archive/"..ngx.var.arg_url);
+            if res.header["Content-Location"] ~= nil then
+              ngx.var.archive = "http://web.archive.org"..res.header["Content-Location"];
+              ngx.location.capture("/archiveintodb?archiveurl="..res.header["Content-Location"].."&uid="..ngx.var.arg_uid);
+            else
+              ngx.var.archive = "";
+            end
+            ngx.print(ngx.var.archive);
+        ';
+    }
+
+    # 2nd step of adding to the database. Does the actual adding to the db.
+    location /intodb2 {
+        internal;
+        rds_json on;
+
+        postgres_pass pgdb;
+
+        postgres_escape $url $arg_url;
+
+        postgres_escape $archive $arg_archive;
+        postgres_query GET "INSERT INTO links (uid, url, archive) VALUES((SELECT substring(md5(random()::text||$url), 0, 6)), $url, $archive) RETURNING uid;";
+
+        postgres_output rds;
+
+    }
+
+    # put a new url into the database. Also grabs the archive.org link
+    location /intodb {
+        internal;
+        set $archive 'no';
+
+        content_by_lua '
+            local json = require("json");
+            local res = ngx.location.capture("/archive/"..ngx.var.arg_url);
+            if res.header["Content-Location"] ~= nil then
+              ngx.var.archive = "http://web.archive.org"..res.header["Content-Location"];
+            else
+              ngx.var.archive = "";
+            end
+            local res = ngx.location.capture("/intodb2?url="..ngx.var.arg_url.."&archive="..ngx.var.archive);
+            local uid = json.decode(res.body)[1]["uid"];
+            ngx.location.capture("/archiveurl?url="..ngx.var.arg_url.."&uid="..uid);
+            ngx.print(res.body)
+        ';
+    }
+
+    # add a new url. If it already exists, return the old one
+    location /add {
+        content_by_lua '
+            local json = require "json";
+            local res = ngx.location.capture("/lookupbyurl?query="..ngx.var.arg_url);
+            ngx.header.content_type = "text/json";
+            if res.status == 200 then
+              local dec = json.decode(res.body)
+              local uid = dec[1]["uid"]
+              ngx.location.capture("/archiveurl?url="..ngx.var.arg_url.."&uid="..uid)
+              ngx.print(res.body)
+            else
+              local res = ngx.location.capture("/intodb?url="..ngx.req.get_uri_args()["url"]);
+              ngx.print(res.body)
+            end
+        ';
+    }           
+}

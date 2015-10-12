@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>info for </title>
+  <script src="//ajax.googleapis.com/ajax/libs/jquery/2.0.3/jquery.min.js"></script>
+  <link href="http://fonts.googleapis.com/css?family=Open+Sans:300italic,400italic,700italic,400,300,700" rel="stylesheet" type="text/css">
+  <style type="text/css" media="screen">
+  body {
+    font: 2em/1.2em 'Open Sans', Helvetica, Verdana, sans-serif;
+    color: #444;
+    background: #F9F9F9;
+    text-align: center;
+  }
+  label {
+    display: block;
+    text-transform: uppercase;
+    font-weight: bold;
+  }
+  input,
+  input[type=submit] {
+    font: inherit;
+  }
+  </style>
+</head>
+<body>
+<script>
+    window.onload = function() {
+        document.title = "info for " + window.location.href.split('/')[4];
+        $.get(window.location.href.replace("/i/", "/s/"), null, setInfo);
+        $.get(window.location.href.replace("/i/", "/a/"), null, getArchives);
+    };
+
+    function setInfo(resp) {
+        resp = resp[0];
+        $("#theurl").text("mtb.wtf/" + resp.uid);
+        $("#theurl").attr("href", window.location.href.replace("/i", ""));
+        $("#redirectto").text(resp["url"]);
+        if (resp["url"].startsWith("http://") || resp["url"].startsWith("https://")) {
+            url = resp["url"];
+        } else {
+            url = "http://" + resp["url"];
+        }
+        $("#redirectto").attr("href", url);
+        $("#added").text(resp["created_at"].split(".")[0]);
+        $("#archiveorg").text("here");
+        $("#archiveorg").attr("href", resp["archive"]);
+    }
+
+    function getArchives(resp) {
+        $.each(resp, function(index, value) {
+            $("#archives tr:last").after("<tr><td>" + value['saved_at'].split('.')[0] + "  </td><td><a href='http://web.archive.org" + value['url'] + "'>here</a></td></tr>");
+        });
+    }
+</script>
+
+URL: <a id=theurl></a><br />
+Redirect to: <a id=redirectto></a><br />
+Added: <a id=added></a><br />
+Original archive.org link: <a id=archiveorg></a><br />
+
+<br /><br />
+
+<center>
+Other archives (created each time shortened URL is created to this destination):
+
+<table id="archives">
+<tr><td>Archived at</td> <td>Link</td></tr>
+
+</table>
+</center>
+
+</body>
+</html>
