@@ -150,6 +150,21 @@ server {
 
     }
 
+    # Update the archive in the links table.  Only used on creation to avoid two calls to archive.org
+    location /updatearchive {
+        internal;
+        rds_json on;
+
+        postgres_pass pgdb;
+
+        postgres_escape $uid $arg_uid;
+        postgres_escape $archive $arg_archive;
+
+        postgres_query GET "UPDATE links SET archive=$archive WHERE uid=$uid";
+
+        postgres_output rds;
+    }
+
     # put a new url into the database. Also grabs the archive.org link
     location /intodb {
         internal;
@@ -157,15 +172,12 @@ server {
 
         content_by_lua '
             local json = require("json");
-            local res = ngx.location.capture("/archive/"..ngx.var.arg_url);
-            if res.header["Content-Location"] ~= nil then
-              ngx.var.archive = "http://web.archive.org"..res.header["Content-Location"];
-            else
-              ngx.var.archive = "";
-            end
-            local res = ngx.location.capture("/intodb2?url="..ngx.var.arg_url.."&archive="..ngx.var.archive);
+            local res = ngx.location.capture("/intodb2?url="..ngx.var.arg_url.."&archive=");
             local uid = json.decode(res.body)[1]["uid"];
-            ngx.location.capture("/archiveurl?url="..ngx.var.arg_url.."&uid="..uid);
+            local ares = ngx.location.capture("/archiveurl?url="..ngx.var.arg_url.."&uid="..uid);
+            if ares.body ~= nil then
+              ngx.location.capture("/updatearchive?archive="..ares.body.."&uid="..uid);
+            end
             ngx.print(res.body)
         ';
     }
@@ -187,4 +199,10 @@ server {
             end
         ';
     }           
+
+    location /addexact {
+        content_by_lua '
+            
+        ';
+    }
 }
