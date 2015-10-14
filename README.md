@@ -29,3 +29,7 @@ Put i.html and index.html in `/var/www/urls/`.
 
 # Example
 See an example of this in production at [mtb.wtf](http://mtb.wtf/)
+
+# Notes
+If you are making edits, make sure to use `postgres_escape` on any variables 
+used in a query.
