@@ -34,7 +34,7 @@ SET default_with_oids = false;
 --
 
 CREATE TABLE archives (
-    uid character varying(10),
+    uid character varying(100),
     url character varying,
     saved_at timestamp(6) without time zone DEFAULT now()
 );
@@ -48,7 +48,7 @@ ALTER TABLE public.archives OWNER TO pgsql;
 
 CREATE TABLE links (
     id integer NOT NULL,
-    uid character varying(10) NOT NULL,
+    uid character varying(100) NOT NULL,
     url character varying NOT NULL,
     created_at timestamp(6) without time zone DEFAULT now(),
     archive character varying
