@@ -37,7 +37,7 @@ server {
     }
 
     # all archives for the url, in json format
-    location ~ "^/a/([0-9a-zA-Z]{5})$" {
+    location ~ "^/a/(.*)$" {
         rds_json on;
 
         postgres_pass pgdb;
@@ -52,7 +52,7 @@ server {
     }
 
     # "short" information on the url
-    location ~ "^/s/([0-9a-zA-Z]{5})$" {
+    location ~ "^/s/(.*)$" {
         rds_json on;
         postgres_pass pgdb;
 
@@ -63,9 +63,18 @@ server {
         postgres_output rds;
     }
 
-    # html formatted info from "/s/....."
-    location ~ "^/i/([0-9a-zA-Z]{5})$" {
+    location /i {
+        internal;
         try_files $uri /i.html;
+    }
+
+    # html formatted info from "/s/....."
+    location ~ "^/i/(.*)$" {
+        content_by_lua '
+            local res = ngx.location.capture("/i");
+            ngx.header.content_type = "text/html";
+            ngx.print(res.body)
+        ';
     }
 
     # Looks up a url from a uid
@@ -165,14 +174,39 @@ server {
         postgres_output rds;
     }
 
+    # Add a new url to the database with requested uid, returning the uid. If uid already exists, return status 204
+    location /intowithuid {
+        
+        rds_json on;
+
+        postgres_pass pgdb;
+
+        postgres_escape $uid $arg_uid;
+        postgres_escape $url $arg_url;
+
+        postgres_query GET "INSERT INTO links (uid, url) SELECT $uid, $url WHERE NOT EXISTS (SELECT * FROM links WHERE uid = $uid) RETURNING uid;";
+
+        postgres_rewrite GET no_rows 204;
+
+        postgres_output rds;
+    }
+
     # put a new url into the database. Also grabs the archive.org link
     location /intodb {
         internal;
-        set $archive 'no';
+        set $archive '';
 
         content_by_lua '
             local json = require("json");
-            local res = ngx.location.capture("/intodb2?url="..ngx.var.arg_url.."&archive=");
+            local res = "";
+            if ngx.var.arg_uid == nil then
+              res = ngx.location.capture("/intodb2?url="..ngx.var.arg_url.."&archive=");
+            else
+              res = ngx.location.capture("/intowithuid?url="..ngx.var.arg_url.."&uid="..ngx.var.arg_uid);
+            end
+            if res.status ~= 200 then
+               ngx.exit(res.status)
+            end
             local uid = json.decode(res.body)[1]["uid"];
             local ares = ngx.location.capture("/archiveurl?url="..ngx.var.arg_url.."&uid="..uid);
             if ares.body ~= nil then
@@ -194,7 +228,7 @@ server {
               ngx.location.capture("/archiveurl?url="..ngx.var.arg_url.."&uid="..uid)
               ngx.print(res.body)
             else
-              local res = ngx.location.capture("/intodb?url="..ngx.req.get_uri_args()["url"]);
+              local res = ngx.location.capture("/intodb?url="..ngx.var.arg_url);
               ngx.print(res.body)
             end
         ';
@@ -202,7 +236,43 @@ server {
 
     location /addexact {
         content_by_lua '
-            
+            local res = ngx.location.capture("/intodb?url="..ngx.var.arg_url.."&uid="..ngx.var.arg_uid);
+            if res.status == 200 then
+              ngx.print(res.body)
+            else
+              ngx.exit(res.status)
+            end
+        ';
+    }
+
+    location /index.html {
+        index index.html;
+    }
+        
+
+    location / {
+        # grab from db, redirect found url. If not found, redirect to mtb.wtf
+        content_by_lua '
+            if ngx.var.request_uri == "/" then
+              local res = ngx.location.capture("/index.html");
+              ngx.header.content_type = "text/html";
+              ngx.print(res.body);
+              ngx.exit(200);
+            end
+            local res = ngx.location.capture("/lookup",
+              { args = { query = string.sub(ngx.var.request_uri, 2) } }
+            );
+            if res.body == "" then
+              ngx.redirect("http://mtb.wtf/")
+            end
+
+            if string.sub(res.body,1,string.len("http://"))=="http://" then
+              ngx.redirect(res.body)
+            elseif string.sub(res.body,1,string.len("https://"))=="https://" then
+              ngx.redirect(res.body)
+            else
+              ngx.redirect("http://"..res.body)
+            end
         ';
     }
 }
