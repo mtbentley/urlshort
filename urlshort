@@ -234,13 +234,24 @@ server {
         ';
     }           
 
+    location /addexact.html {
+        index addexact.html;
+    }
+
     location /addexact {
         content_by_lua '
-            local res = ngx.location.capture("/intodb?url="..ngx.var.arg_url.."&uid="..ngx.var.arg_uid);
-            if res.status == 200 then
-              ngx.print(res.body)
+            if (ngx.var.arg_url == nil or ngx.var.arg_uid == nil) then
+              ngx.header.content_type = "text/html";
+              local res = ngx.location.capture("/addexact.html");
+              ngx.print(res.body);
             else
-              ngx.exit(res.status)
+              local res = ngx.location.capture("/intodb?url="..ngx.var.arg_url.."&uid="..ngx.var.arg_uid);
+              if res.status == 200 then
+                ngx.header.content_type = "text/json";
+                ngx.print(res.body)
+              else
+                ngx.exit(res.status)
+              end
             end
         ';
     }
@@ -248,7 +259,6 @@ server {
     location /index.html {
         index index.html;
     }
-        
 
     location / {
         # grab from db, redirect found url. If not found, redirect to mtb.wtf
