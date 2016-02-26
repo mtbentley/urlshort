@@ -32,7 +32,7 @@
 
     function setInfo(resp) {
         resp = resp[0];
-        $("#theurl").text("mtb.wtf/" + resp.uid);
+        $("#theurl").text(location.hostname + "/" + resp.uid);
         $("#theurl").attr("href", window.location.href.replace("/i", ""));
         $("#redirectto").text(resp["url"]);
         if (resp["url"].startsWith("http://") || resp["url"].startsWith("https://")) {

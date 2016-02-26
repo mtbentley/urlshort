@@ -11,10 +11,14 @@ upstream archiveorg {
 
 server {
     listen 80;
-    server_name mtb.wtf;
+    server_name mtb.wtf s.case.edu;
     root /var/www/urls;
     index index.html;
     
+    location /.well-known/ {
+        root /var/www/urls/;
+    }
+
     # Matches 5 hex chars. Does the actual redirect
     location ~ "^/([0-9a-zA-Z]{5})$" {
         # grab from db, redirect found url. If not found, redirect to mtb.wtf
@@ -23,7 +27,7 @@ server {
               { args = { query = string.sub(ngx.var.request_uri, 2) } }
             );
             if res.body == "" then
-              ngx.redirect("http://mtb.wtf/")
+              ngx.redirect("/")
             end
 
             if string.sub(res.body,1,string.len("http://"))=="http://" then
@@ -202,6 +206,9 @@ server {
             if ngx.var.arg_uid == nil then
               res = ngx.location.capture("/intodb2?url="..ngx.var.arg_url.."&archive=");
             else
+              if ngx.var.arg_uid:find(".well-known") ~= nill then
+                nxg.exit(403)
+              end
               res = ngx.location.capture("/intowithuid?url="..ngx.var.arg_url.."&uid="..ngx.var.arg_uid);
             end
             if res.status ~= 200 then
@@ -273,7 +280,7 @@ server {
               { args = { query = string.sub(ngx.var.request_uri, 2) } }
             );
             if res.body == "" then
-              ngx.redirect("http://mtb.wtf/")
+              ngx.redirect("/")
             end
 
             if string.sub(res.body,1,string.len("http://"))=="http://" then
@@ -285,4 +292,5 @@ server {
             end
         ';
     }
+
 }
